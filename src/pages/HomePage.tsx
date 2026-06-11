@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, ListTodo } from 'lucide-react';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import type { Filter, Todo } from '@/types';
@@ -9,6 +9,7 @@ import FilterBar from '@/components/FilterBar';
 export default function HomePage() {
   const [todos, setTodos] = useLocalStorage<Todo[]>('todos', []);
   const [filter, setFilter] = useState<Filter>('all');
+  const notifiedRef = useRef<Set<string>>(new Set());
 
   const addTodo = (text: string) => {
     const trimmed = text.trim();
@@ -19,15 +20,17 @@ export default function HomePage() {
       completed: false,
       createdAt: Date.now(),
     };
-    setTodos((prev) => [newTodo, ...prev]);
+    setTodos((prev: Todo[]) => [newTodo, ...prev]);
   };
 
   const toggleTodo = (id: string) => {
-    setTodos((prev) => prev.map((t) => (t.id === id ? { ...t, completed: !t.completed } : t)));
+    setTodos((prev: Todo[]) =>
+      prev.map((t: Todo) => (t.id === id ? { ...t, completed: !t.completed } : t))
+    );
   };
 
   const deleteTodo = (id: string) => {
-    setTodos((prev) => prev.filter((t) => t.id !== id));
+    setTodos((prev: Todo[]) => prev.filter((t: Todo) => t.id !== id));
   };
 
   const editTodo = (id: string, text: string) => {
@@ -36,20 +39,151 @@ export default function HomePage() {
       deleteTodo(id);
       return;
     }
-    setTodos((prev) => prev.map((t) => (t.id === id ? { ...t, text: trimmed } : t)));
+    setTodos((prev: Todo[]) =>
+      prev.map((t: Todo) => (t.id === id ? { ...t, text: trimmed } : t))
+    );
   };
 
   const clearCompleted = () => {
-    setTodos((prev) => prev.filter((t) => !t.completed));
+    setTodos((prev: Todo[]) => prev.filter((t: Todo) => !t.completed));
   };
 
+  const setTimer = (id: string, durationMs: number) => {
+    notifiedRef.current.delete(id);
+    setTodos((prev: Todo[]) =>
+      prev.map((t: Todo) =>
+        t.id === id
+          ? {
+              ...t,
+              timer: {
+                durationMs,
+                remainingMs: durationMs,
+                running: true,
+                lastStartedAt: Date.now(),
+              },
+            }
+          : t
+      )
+    );
+  };
+
+  const startTimer = (id: string) => {
+    setTodos((prev: Todo[]) =>
+      prev.map((t: Todo) => {
+        if (t.id !== id || !t.timer || t.timer.running) return t;
+        return {
+          ...t,
+          timer: { ...t.timer, running: true, lastStartedAt: Date.now() },
+        };
+      })
+    );
+  };
+
+  const pauseTimer = (id: string) => {
+    setTodos((prev: Todo[]) =>
+      prev.map((t: Todo) => {
+        if (t.id !== id || !t.timer || !t.timer.running) return t;
+        const elapsed = t.timer.lastStartedAt ? Date.now() - t.timer.lastStartedAt : 0;
+        return {
+          ...t,
+          timer: {
+            ...t.timer,
+            running: false,
+            remainingMs: Math.max(0, t.timer.remainingMs - elapsed),
+            lastStartedAt: null,
+          },
+        };
+      })
+    );
+  };
+
+  const resetTimer = (id: string) => {
+    notifiedRef.current.delete(id);
+    setTodos((prev: Todo[]) =>
+      prev.map((t: Todo) => {
+        if (t.id !== id || !t.timer) return t;
+        return {
+          ...t,
+          timer: {
+            ...t.timer,
+            running: false,
+            remainingMs: t.timer.durationMs,
+            lastStartedAt: null,
+          },
+        };
+      })
+    );
+  };
+
+  const removeTimer = (id: string) => {
+    notifiedRef.current.delete(id);
+    setTodos((prev: Todo[]) =>
+      prev.map((t: Todo) => {
+        if (t.id !== id) return t;
+        const { timer: _timer, ...rest } = t;
+        void _timer;
+        return rest;
+      })
+    );
+  };
+
+  // Watch for finished timers and notify / auto-pause
+  useEffect(() => {
+    const hasRunning = todos.some((t: Todo) => t.timer?.running);
+    if (!hasRunning) return;
+
+    const interval = window.setInterval(() => {
+      setTodos((prev: Todo[]) => {
+        let changed = false;
+        const next = prev.map((t: Todo) => {
+          if (!t.timer || !t.timer.running || t.timer.lastStartedAt === null) return t;
+          const elapsed = Date.now() - t.timer.lastStartedAt;
+          const remaining = t.timer.remainingMs - elapsed;
+          if (remaining <= 0) {
+            changed = true;
+            if (!notifiedRef.current.has(t.id)) {
+              notifiedRef.current.add(t.id);
+              if (typeof window !== 'undefined' && 'Notification' in window) {
+                if (Notification.permission === 'granted') {
+                  new Notification('Timer finished', { body: t.text });
+                }
+              }
+            }
+            return {
+              ...t,
+              timer: {
+                ...t.timer,
+                running: false,
+                remainingMs: 0,
+                lastStartedAt: null,
+              },
+            };
+          }
+          return t;
+        });
+        return changed ? next : prev;
+      });
+    }, 500);
+
+    return () => window.clearInterval(interval);
+  }, [todos, setTodos]);
+
+  // Request notification permission once when first timer is set
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    const hasTimer = todos.some((t: Todo) => !!t.timer);
+    if (hasTimer && Notification.permission === 'default') {
+      Notification.requestPermission().catch(() => undefined);
+    }
+  }, [todos]);
+
   const filtered = useMemo(() => {
-    if (filter === 'active') return todos.filter((t) => !t.completed);
-    if (filter === 'completed') return todos.filter((t) => t.completed);
+    if (filter === 'active') return todos.filter((t: Todo) => !t.completed);
+    if (filter === 'completed') return todos.filter((t: Todo) => t.completed);
     return todos;
   }, [todos, filter]);
 
-  const activeCount = todos.filter((t) => !t.completed).length;
+  const activeCount = todos.filter((t: Todo) => !t.completed).length;
   const completedCount = todos.length - activeCount;
 
   return (
@@ -81,6 +215,11 @@ export default function HomePage() {
             onToggle={toggleTodo}
             onDelete={deleteTodo}
             onEdit={editTodo}
+            onSetTimer={setTimer}
+            onStartTimer={startTimer}
+            onPauseTimer={pauseTimer}
+            onResetTimer={resetTimer}
+            onRemoveTimer={removeTimer}
           />
 
           {todos.length === 0 && (

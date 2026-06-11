@@ -2,17 +2,33 @@ import { useEffect, useRef, useState } from 'react';
 import { Check, Pencil, Trash2, X } from 'lucide-react';
 import clsx from 'clsx';
 import type { Todo } from '@/types';
+import TodoTimer from '@/components/TodoTimer';
 
 type TodoItemProps = {
   todo: Todo;
   onToggle: (id: string) => void;
   onDelete: (id: string) => void;
   onEdit: (id: string, text: string) => void;
+  onSetTimer: (id: string, durationMs: number) => void;
+  onStartTimer: (id: string) => void;
+  onPauseTimer: (id: string) => void;
+  onResetTimer: (id: string) => void;
+  onRemoveTimer: (id: string) => void;
 };
 
-export default function TodoItem({ todo, onToggle, onDelete, onEdit }: TodoItemProps) {
-  const [isEditing, setIsEditing] = useState(false);
-  const [draft, setDraft] = useState(todo.text);
+export default function TodoItem({
+  todo,
+  onToggle,
+  onDelete,
+  onEdit,
+  onSetTimer,
+  onStartTimer,
+  onPauseTimer,
+  onResetTimer,
+  onRemoveTimer,
+}: TodoItemProps) {
+  const [isEditing, setIsEditing] = useState<boolean>(false);
+  const [draft, setDraft] = useState<string>(todo.text);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -69,15 +85,25 @@ export default function TodoItem({ todo, onToggle, onDelete, onEdit }: TodoItemP
           className="flex-1 px-2 py-1 rounded-md border border-indigo-200 focus:ring-4 focus:ring-indigo-100 outline-none text-slate-700"
         />
       ) : (
-        <span
-          onDoubleClick={startEdit}
-          className={clsx(
-            'flex-1 select-none cursor-pointer',
-            todo.completed ? 'line-through text-slate-400' : 'text-slate-700'
-          )}
-        >
-          {todo.text}
-        </span>
+        <div className="flex-1 flex items-center gap-2 flex-wrap">
+          <span
+            onDoubleClick={startEdit}
+            className={clsx(
+              'select-none cursor-pointer',
+              todo.completed ? 'line-through text-slate-400' : 'text-slate-700'
+            )}
+          >
+            {todo.text}
+          </span>
+          <TodoTimer
+            timer={todo.timer}
+            onSet={(durationMs: number) => onSetTimer(todo.id, durationMs)}
+            onStart={() => onStartTimer(todo.id)}
+            onPause={() => onPauseTimer(todo.id)}
+            onReset={() => onResetTimer(todo.id)}
+            onRemove={() => onRemoveTimer(todo.id)}
+          />
+        </div>
       )}
 
       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
